@@ -85,7 +85,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .lbl { font-family: var(--font-ui); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
 .field { display: flex; flex-direction: column; gap: 4px; }
-select, input[type="number"], input[type="text"], textarea { background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; padding: 6px 8px; min-width: 0; }
+select, input[type="number"], input[type="text"], input[type="email"], input[type="password"], textarea { background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; padding: 6px 8px; min-width: 0; }
 textarea { resize: vertical; min-height: 72px; font-family: var(--font-body); line-height: 1.4; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .row > .field { flex: 1 1 90px; }
@@ -172,6 +172,14 @@ tr[data-pick] { cursor: pointer; }
 .lib-item b { font-family: var(--font-display); font-weight: 400; letter-spacing: .05em; font-size: 14px; }
 .lib-item .meta { font-family: var(--font-ui); font-size: 11px; color: var(--muted); }
 .lib-item .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.lib-item .sub { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.cloud { display: flex; flex-direction: column; gap: 10px; }
+.cloud .row > input[type="email"], .cloud .row > input[type="text"], .cloud .row > input[type="password"] { flex: 1 1 160px; }
+.cloud form.stack { display: flex; flex-direction: column; gap: 8px; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--cyan); text-decoration: underline; cursor: pointer; font-family: var(--font-ui); font-size: 12px; justify-self: start; align-self: flex-start; }
+.cloud .who { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; justify-content: space-between; font-family: var(--font-ui); font-size: 12.5px; }
+.mem { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; justify-content: space-between; font-family: var(--font-ui); font-size: 12px; }
+.mem select { padding: 3px 6px; }
 .floater { position: fixed; z-index: 60; pointer-events: none; transform: translate(-50%, -50%); padding: 4px; border-radius: 4px;
   background: var(--panel); border: 1px solid var(--gold); box-shadow: 0 4px 14px rgba(0,0,0,.3); line-height: 0; }
 .floater img { height: 30px; width: auto; } .floater.on-board { display: none; }
@@ -367,9 +375,15 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
         <div class="ph">Scenario sheet <button class="btn sm" id="copySheet">Copy as text</button></div>
         <div class="pb sheet" id="sheet"></div>
       </section>
+      <section class="panel" id="cloudPanel" hidden>
+        <div class="ph">Account &amp; sharing <small id="cloudWho"></small></div>
+        <div class="pb cloud" id="cloudBody"></div>
+      </section>
       <section class="panel">
         <div class="ph">Library <small id="libWhere"></small></div>
         <div class="pb">
+          <div class="seg" role="group" aria-label="Library" id="libTabs" hidden style="align-self:flex-start">
+            <button type="button" data-tab="local" aria-pressed="true">This browser</button><button type="button" data-tab="cloud" aria-pressed="false">My cloud</button><button type="button" data-tab="public" aria-pressed="false">Public</button></div>
           <div class="lib" id="lib"></div>
           <div class="lbl">Examples from the scenario packs</div>
           <div class="lib" id="examples"></div>
@@ -494,7 +508,48 @@ function blank(deploy = "cornertri") {
     length: 6, players: "2", rules: "", scenery: "4 Micrometeor Clouds and 4 Debris Fields, placed alternately.",
     sites: [], objects: [], rings: [], pieces: [], zones: [], zoneName: "", zoneNotes: "", customApproach: { name: "", blue: "close", red: "close", notes: "" }, mirror: true };
 }
+// Scenarios arrive from other people (shared links, imports), so every field is coerced to the shape the builder draws.
+const isId = (v) => typeof v === "string" && /^[\w-]{1,48}$/.test(v);
+const isUuid = (v) => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+function sanitise(o) {
+  o = o && typeof o === "object" ? o : {};
+  const num = (v, d, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
+  const str = (v, max = 4000) => (typeof v === "string" ? v.slice(0, max) : "");
+  const one = (v, list, d) => (list.includes(v) ? v : d);
+  const list = (v, max = 300) => (Array.isArray(v) ? v.filter((x) => x && typeof x === "object").slice(0, max) : []);
+  const base = (x, p) => { const y = { id: isId(x.id) ? x.id : uid(p) }; if (isId(x.pair)) y.pair = x.pair; return y; };
+  const xy = (x, y) => { y.x = num(x.x, 24, 0, 48); y.y = num(x.y, 24, 0, 48); return y; };
+  const ca = o.customApproach && typeof o.customApproach === "object" ? o.customApproach : {};
+  const out = {
+    id: isId(o.id) ? o.id : uid("sc"), name: str(o.name, 60) || "Untitled scenario", tagline: str(o.tagline, 160),
+    deploy: one(o.deploy, [...Object.keys(DEPLOY_NAME), "custom"], "line"), approach: one(o.approach, [...Object.keys(APPROACHES), "custom"], "close"),
+    objective: one(o.objective, Object.keys(OBJ_NAME), "standard"), length: one(Number(o.length), [5, 6, 7], 6), players: one(String(o.players), ["2", "3–4"], "2"),
+    rounds: Array.isArray(o.rounds) ? [...new Set(o.rounds.map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 7))] : [3, 4, 5, 6],
+    rules: str(o.rules), scenery: str(o.scenery), zoneName: str(o.zoneName, 40), zoneNotes: str(o.zoneNotes), mirror: o.mirror !== false,
+    customApproach: { name: str(ca.name, 40), blue: one(ca.blue, Object.keys(ARRIVE), "close"), red: one(ca.red, Object.keys(ARRIVE), "close"), notes: str(ca.notes) },
+    sites: list(o.sites).map((x) => Object.assign(xy(x, base(x, "s")), { t: one(x.t, ["city", "station"], "city"), s: one(x.s, ["S", "M", "L"], "M"),
+      f: [...new Set(Array.isArray(x.f) ? x.f.filter((k) => FEAT_NAME[k]) : [])].slice(0, 4) })),
+    objects: list(o.objects).map((x) => { const y = Object.assign(xy(x, base(x, "o")), { d: num(x.d, 6, 1, 36), kind: one(x.kind, Object.keys(OBJ_KIND), "moon") });
+      if (x.rect) Object.assign(y, { rect: true, w: num(x.w, 12, 1, 36), h: num(x.h, 4, 1, 36) }); return y; }),
+    rings: list(o.rings).map((x) => Object.assign(base(x, "r"), { k: one(x.k, ["h", "v", "d1", "d2"], "h"), p: num(x.p, 24, 0, 48) })),
+    pieces: list(o.pieces).map((x) => Object.assign(xy(x, base(x, "p")), { k: one(x.k, ["micro", "debris"], "micro"), w: num(x.w, 6, 2, 24), h: num(x.h, 3, 2, 24) })),
+    zones: list(o.zones, 60).map((x) => {
+      const y = Object.assign(base(x, "z"), { side: one(x.side, ["blue", "red"], "blue"), shape: one(x.shape, ["poly", "rect", "circle", "tri"], "poly") });
+      if (y.shape === "poly") y.pts = (Array.isArray(x.pts) ? x.pts : []).filter(Array.isArray).slice(0, 100).map((q) => [num(q[0], 0, 0, 48), num(q[1], 0, 0, 48)]);
+      else if (y.shape === "rect") Object.assign(y, { x: num(x.x, 0, 0, 48), y: num(x.y, 0, 0, 48), w: num(x.w, 12, 1, 48), h: num(x.h, 2, 1, 48) });
+      else if (y.shape === "circle") Object.assign(y, { x: num(x.x, 0, 0, 48), y: num(x.y, 0, 0, 48), r: num(x.r, 9, 1, 48) });
+      else Object.assign(y, { corner: one(x.corner, Object.keys(CORNER_NAME), "tl"), a: num(x.a, 16, 1, 48), b: num(x.b, 16, 1, 48) });
+      return y;
+    }).filter((z) => z.shape !== "poly" || z.pts.length >= 3),
+  };
+  out.rounds = out.rounds.filter((r) => r <= out.length);
+  const c = o.cloud;
+  if (c && isUuid(c.id) && isUuid(c.owner)) out.cloud = { id: c.id, owner: c.owner, group_id: isUuid(c.group_id) ? c.group_id : null,
+    visibility: one(c.visibility, ["private", "group", "public"], "private"), owner_name: str(c.owner_name, 40), group_name: str(c.group_name, 60) };
+  return out;
+}
 function normalise(o) {
+  o = sanitise(o);
   const b = blank(o.deploy || "line");
   const s = Object.assign(b, o);
   for (const k of ["sites", "objects", "rings", "pieces", "zones"]) s[k] = Array.isArray(s[k]) ? s[k] : [];
@@ -1514,7 +1569,8 @@ function sheetText() {
 }
 function refreshAll() {
   const ai = approachInfo(); F("apSummary").textContent = `Blue: ${ARRIVE[ai.blue][0]} · Red: ${ARRIVE[ai.red][0]}`;
-  render(); renderInspector(); renderBalance(); renderSheet(); F("undoBtn").disabled = !hist.length; F("redoBtn").disabled = !fut.length; }
+  render(); renderInspector(); renderBalance(); renderSheet(); F("undoBtn").disabled = !hist.length; F("redoBtn").disabled = !fut.length;
+  const ck = JSON.stringify(S.cloud || null); if (ck !== refreshAll.cloud) { refreshAll.cloud = ck; if (typeof renderCloud === "function") renderCloud(); } }
 
 // form wiring
 F("scName").addEventListener("change", () => change(() => { S.name = F("scName").value.trim() || "Untitled scenario"; }));
@@ -1580,7 +1636,7 @@ async function copyText(t, ok) {
 }
 function loadScenario(sc, fresh) {
   const prev = JSON.stringify(S);
-  S = normalise(clone(sc)); if (fresh) S.id = uid("sc");
+  S = normalise(clone(sc)); if (fresh) { S.id = uid("sc"); delete S.cloud; }
   selId = null; setPlacing(null); syncForm();
   if (prev && prev !== "null") { hist.push(prev); fut = []; }
   autosave(); refreshAll();
@@ -1592,6 +1648,7 @@ function scenarioDoc() { const d = clone(S); d.updated = new Date().toISOString(
 function readLocalLib() { try { return JSON.parse(localStorage.getItem("dfc-builder-lib") || "[]"); } catch (e) { return []; } }
 function writeLocalLib(l) { try { localStorage.setItem("dfc-builder-lib", JSON.stringify(l)); return true; } catch (e) { return false; } }
 async function saveScenario() {
+  if (sb && me) { await saveCloud(); return; }
   const d = scenarioDoc();
   if (store) {
     try { await store.doc(d.id).set(d); toast(`Saved “${d.name}”.`); }
@@ -1612,6 +1669,8 @@ async function deleteScenario(id) {
   else { library = readLocalLib().filter((x) => x.id !== id); writeLocalLib(library); renderLibrary(); toast("Deleted."); }
 }
 function renderLibrary() {
+  F("libTabs").querySelectorAll("[data-tab]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.tab === libTab)));
+  if (libTab !== "local" && sb) { renderCloudLib(); return; }
   F("libWhere").innerHTML = `saved in this browser <button class="btn sm" id="backupBtn" type="button">Back up library</button>`;
   F("backupBtn").addEventListener("click", () => library.length ? offer("dropfleet_scenario_library.json", JSON.stringify(library, null, 2)) : toast("Nothing saved yet."));
   const host = F("lib");
@@ -1633,6 +1692,317 @@ function renderExamples() {
   F("examples").querySelectorAll("[data-ex]").forEach((b) => b.addEventListener("click", () => { loadScenario(EXAMPLES[b.dataset.ex], true); toast(`Opened a copy of “${EXAMPLES[b.dataset.ex].name}”.`); }));
 }
 function connectStore() { library = readLocalLib(); renderLibrary(); }
+
+// ---------------------------------------------------------------- cloud library (Supabase; see SETUP.md)
+// Fill in from Supabase → Project Settings → API. Left blank, the builder keeps everything in this browser as before.
+const CLOUD = {
+  url: "",                                    // e.g. "https://abcdefghijkl.supabase.co"
+  key: "",                                    // the publishable (anon) key: safe to publish, Row Level Security does the guarding
+  password: true,                             // email + password accounts (Supabase → Authentication → Providers → Email)
+  providers: [],                              // extra sign-in buttons: any of "github", "discord", "google", each switched on in Supabase first
+  email: false,                               // Supabase can send email (custom SMTP set up): adds "Forgot password?" and sign-in links
+};
+const SB_SRC = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js";
+const SB_SRI = "sha256-1qXEQUpdTOZG2cHeIjqnBn0/9mTBU5T/63/P/HYzVKM=";
+const PROVIDER_NAME = { github: "GitHub", discord: "Discord", google: "Google" };
+const LIST_COLS = "id,name,owner,group_id,visibility,updated_at,deploy:doc->>deploy,zoneName:doc->>zoneName,sites:doc->sites,profiles(display_name),groups(name)";
+const META_COLS = "id,owner,group_id,visibility,profiles(display_name),groups(name)";
+let sb = null, me = null, myName = "", myGroups = [], cloudRows = [], publicRows = [], libTab = "local", pubQuery = "", openGroup = null, members = [], linkDone = false;
+let authMode = "in", recovering = false; // signed-out form: "in" | "up" | "reset"; recovering = arrived from a password-reset email
+const roleIn = (g) => (myGroups.find((x) => x.id === g) || {}).role;
+const canEditRow = (m) => !!(me && m && (m.owner === me.id || (m.visibility === "group" && ["owner", "editor"].includes(roleIn(m.group_id)))));
+const metaOf = (r) => ({ id: r.id, owner: r.owner, group_id: r.group_id, visibility: r.visibility, owner_name: r.profiles?.display_name || "", group_name: r.groups?.name || "" });
+const pageURL = () => location.origin + location.pathname;
+const visText = (r) => r.visibility === "public" ? "Everyone" : r.visibility === "group" ? (r.groups?.name || r.group_name || "Group") : "Only me";
+function cloudErr(e, fallback) {
+  const m = String((e && (e.message || "") + " " + (e.hint || "")) || "");
+  const known = { scenario_limit: "You can keep up to 500 scenarios in the cloud.", group_limit: "You can create up to 20 groups.",
+    last_owner: "Make someone else an owner first, or delete the group.", bad_invite: "That invite link is wrong or has been replaced.",
+    not_group_editor: "Only group owners and editors can share into that group.", group_full: "That group is full." };
+  for (const k in known) if (m.includes(k)) return known[k];
+  if (/JWT|not_signed_in|session/i.test(m)) return "Your sign-in has expired. Sign in again.";
+  return fallback;
+}
+function authErr(e) {
+  const t = `${e?.code || ""} ${e?.message || ""}`;
+  if (/invalid_credentials|Invalid login/i.test(t)) return "That email and password don't match.";
+  if (/user_already_exists|already registered/i.test(t)) return "There's already an account with that email. Sign in instead.";
+  if (/email_not_confirmed|not confirmed/i.test(t)) return "Confirm your email first: check your inbox for the link.";
+  if (/weak_password|Password should/i.test(t)) return "Use a longer password: at least 8 characters.";
+  if (/same_password|different from the old/i.test(t)) return "Choose a password you haven't used here before.";
+  if (/signup_disabled|Signups not allowed/i.test(t)) return "New accounts are switched off at the moment.";
+  if (/rate|too many/i.test(t)) return "Too many attempts. Wait a few minutes and try again.";
+  if (/email_address_invalid|invalid.*email|validate email/i.test(t)) return "That email address doesn't look right.";
+  return "That didn't work. Check your details and try again.";
+}
+function loadScript(src, integrity) {
+  return new Promise((res, rej) => {
+    const el = document.createElement("script"); el.src = src; el.integrity = integrity; el.crossOrigin = "anonymous";
+    el.onload = res; el.onerror = rej; document.head.appendChild(el);
+  });
+}
+async function cloudInit() {
+  if (!CLOUD.url || !CLOUD.key) return;
+  F("cloudPanel").hidden = false; F("libTabs").hidden = false;
+  F("cloudBody").innerHTML = `<p class="hint" style="margin:0">Connecting…</p>`;
+  try { await loadScript(SB_SRC, SB_SRI); sb = window.supabase.createClient(CLOUD.url, CLOUD.key); }
+  catch (e) { sb = null; F("cloudBody").innerHTML = `<p class="hint" style="margin:0">The cloud library couldn't be reached, so Save keeps scenarios in this browser. Reload to try again.</p>`; return; }
+  sb.auth.onAuthStateChange((ev, session) => {
+    const u = session?.user || null;
+    if (ev === "PASSWORD_RECOVERY") { recovering = true; setTimeout(() => renderCloud(), 0); }
+    if (ev !== "INITIAL_SESSION" && (u?.id || null) === (me?.id || null)) return;
+    setTimeout(() => onSession(u), 0); // supabase-js asks for no awaited calls inside this callback
+  });
+}
+async function onSession(u) {
+  me = u; myGroups = []; cloudRows = []; members = []; openGroup = null;
+  if (me) {
+    const p = await sb.from("profiles").select("display_name").eq("id", me.id).maybeSingle();
+    myName = p.data?.display_name || "Commander";
+    await loadGroups();
+    let pending = null; try { pending = sessionStorage.getItem("dfc-join"); sessionStorage.removeItem("dfc-join"); } catch (e) {}
+    if (pending) await joinGroup(pending);
+  }
+  await refreshCloudLists();
+  if (!linkDone) { linkDone = true; await handleLink(); }
+  F("saveBtn").title = me ? "Save to your cloud library" : "Save in this browser";
+  renderCloud(); renderLibrary();
+}
+// ?s=<id> opens a shared scenario; ?join=<code> joins a group (after signing in).
+async function handleLink() {
+  const q = new URLSearchParams(location.search), sid = q.get("s"), code = q.get("join");
+  if (!sid && !code) return;
+  history.replaceState(null, "", pageURL());
+  if (sid && isUuid(sid)) await openCloud(sid, false, "That scenario is private or no longer exists. If it was shared with a group, sign in first.");
+  if (code) {
+    if (me) await joinGroup(code);
+    else { try { sessionStorage.setItem("dfc-join", code); } catch (e) {} toast("Sign in (Account & sharing, below) to join the group."); }
+  }
+}
+async function loadGroups() {
+  const { data, error } = await sb.from("memberships").select("role, groups(id, name, invite_code, join_role)").eq("user_id", me.id);
+  myGroups = error ? [] : data.filter((r) => r.groups).map((r) => ({ ...r.groups, role: r.role })).sort((a, b) => a.name.localeCompare(b.name));
+}
+async function refreshCloudLists() {
+  if (!sb) return;
+  cloudRows = [];
+  if (me) {
+    const ids = myGroups.map((g) => g.id);
+    let q = sb.from("scenarios").select(LIST_COLS).order("updated_at", { ascending: false }).limit(300);
+    q = ids.length ? q.or(`owner.eq.${me.id},group_id.in.(${ids.join(",")})`) : q.eq("owner", me.id);
+    const { data, error } = await q; if (!error) cloudRows = data;
+  }
+  let q = sb.from("scenarios").select(LIST_COLS).eq("visibility", "public").order("updated_at", { ascending: false }).limit(60);
+  const term = pubQuery.replace(/[%_\\,()*]/g, " ").trim();
+  if (term) q = q.ilike("name", `%${term}%`);
+  const { data, error } = await q; publicRows = error ? [] : data;
+}
+async function openCloud(id, fresh, failMsg) {
+  const { data, error } = await sb.from("scenarios").select("doc," + META_COLS + ",name").eq("id", id).maybeSingle();
+  if (error || !data) { toast(failMsg || "That scenario couldn't be opened."); return; }
+  const d = Object.assign({}, data.doc, { name: data.name }); delete d.cloud;
+  loadScenario(d, fresh);
+  if (!fresh) { S.cloud = metaOf(data); autosave(); }
+  toast(fresh ? `Opened a copy of “${data.name}”. Save it to keep it.` : `Opened “${data.name}”${canEditRow(S.cloud) || !me ? "" : ". Saving makes your own copy"}.`);
+  renderCloud();
+}
+async function saveCloud() {
+  const doc = scenarioDoc(); delete doc.cloud;
+  const row = { name: (S.name || "").trim().slice(0, 60) || "Untitled scenario", doc };
+  const m = S.cloud, mine = canEditRow(m);
+  let res = mine ? await sb.from("scenarios").update(row).eq("id", m.id).select(META_COLS).maybeSingle() : null;
+  if (!res || (!res.error && !res.data)) res = await sb.from("scenarios").insert(row).select(META_COLS).single(); // new, someone else's, or deleted meanwhile
+  if (res.error) { toast(cloudErr(res.error, "Saving to the cloud failed, so it was saved in this browser instead.")); saveLocal(scenarioDoc()); return; }
+  const copied = m && res.data.id !== m.id;
+  S.cloud = metaOf(res.data); autosave();
+  toast(copied ? `Saved your own copy of “${row.name}”.` : `Saved “${row.name}” to the cloud.`);
+  await refreshCloudLists(); renderCloud(); renderLibrary();
+}
+async function setSharing(v) {
+  const [visibility, group_id] = v.startsWith("g:") ? ["group", v.slice(2)] : [v, null];
+  const { data, error } = await sb.from("scenarios").update({ visibility, group_id }).eq("id", S.cloud.id).select(META_COLS).maybeSingle();
+  if (error || !data) toast(cloudErr(error, "Couldn't change who can see it."));
+  else { S.cloud = metaOf(data); autosave(); toast(visibility === "public" ? "Everyone can now find it under Public." : visibility === "group" ? `Shared with ${S.cloud.group_name}.` : "Only you can see it now."); }
+  await refreshCloudLists(); renderCloud(); renderLibrary();
+}
+async function deleteCloud(id) {
+  const { data, error } = await sb.from("scenarios").delete().eq("id", id).select("id");
+  if (error || !data.length) { toast("You can't delete that one."); return; }
+  if (S.cloud?.id === id) { delete S.cloud; autosave(); }
+  toast("Deleted from the cloud."); await refreshCloudLists(); renderCloud(); renderLibrary();
+}
+async function joinGroup(raw) {
+  const code = String(raw).replace(/^.*[?&]join=/, "").replace(/[^\w-]/g, "").slice(0, 64);
+  if (!code) return;
+  const { data, error } = await sb.rpc("join_group", { code });
+  if (error) { toast(cloudErr(error, "Joining failed. Check the invite link.")); return; }
+  await loadGroups(); await refreshCloudLists();
+  toast(`You're in “${(myGroups.find((g) => g.id === data) || {}).name || "the group"}”.`); renderCloud(); renderLibrary();
+}
+async function groupAction(fn, fail, ok) {
+  const { data, error } = await fn();
+  if (error || (Array.isArray(data) && !data.length)) { toast(cloudErr(error, fail)); return false; }
+  if (ok) toast(ok);
+  await loadGroups(); await refreshCloudLists();
+  if (openGroup && myGroups.some((g) => g.id === openGroup)) await loadMembers(openGroup); else openGroup = null;
+  renderCloud(); renderLibrary(); return true;
+}
+async function loadMembers(gid) {
+  const { data } = await sb.from("memberships").select("user_id, role, profiles(display_name)").eq("group_id", gid);
+  members = (data || []).sort((a, b) => (a.profiles?.display_name || "").localeCompare(b.profiles?.display_name || ""));
+}
+const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("");
+function armed(btn, label, go) {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.armed) { go(); return; }
+    btn.dataset.armed = "1"; const was = btn.textContent; btn.textContent = label;
+    setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = was; } }, 3500);
+  });
+}
+function renderCloud() {
+  if (!sb) return;
+  const body = F("cloudBody");
+  F("cloudWho").textContent = me ? "" : "not signed in";
+  if (!me) {
+    const up = authMode === "up", reset = authMode === "reset";
+    const provs = CLOUD.providers.filter((k) => PROVIDER_NAME[k]);
+    const pw = !CLOUD.password ? "" : reset ? `<form class="stack" id="cReset">
+        <p class="hint" style="margin:0">Enter your account's email and we'll send a link to choose a new password.</p>
+        <input type="email" id="cEmail" required autocomplete="email" placeholder="you@example.com" aria-label="Email address">
+        <div class="row"><button class="btn gold" type="submit">Email me a reset link</button><button class="linkbtn" type="button" data-mode="in">Back to sign in</button></div></form>`
+      : `<div class="seg" role="group" aria-label="Account" style="align-self:flex-start"><button type="button" data-mode="in" aria-pressed="${!up}">Sign in</button><button type="button" data-mode="up" aria-pressed="${up}">Create account</button></div>
+      <form class="stack" id="cAuth">
+        ${up ? `<div class="field"><label class="lbl" for="cNameNew">Display name (shown to other people)</label><input type="text" id="cNameNew" required maxlength="40" autocomplete="nickname" placeholder="e.g. Admiral Vex"></div>` : ""}
+        <div class="field"><label class="lbl" for="cEmail">Email</label><input type="email" id="cEmail" required autocomplete="email" placeholder="you@example.com"></div>
+        <div class="field"><label class="lbl" for="cPass">Password${up ? " (at least 8 characters)" : ""}</label><input type="password" id="cPass" required minlength="${up ? 8 : 1}" autocomplete="${up ? "new-password" : "current-password"}"></div>
+        <div class="row"><button class="btn gold" type="submit">${up ? "Create account" : "Sign in"}</button>
+          ${!up && CLOUD.email ? `<button class="linkbtn" type="button" data-mode="reset">Forgot password?</button>` : ""}</div>
+        ${up ? `<p class="hint" style="margin:0">Your email stays private; only your display name is shown with scenarios you share.</p>` : ""}</form>`;
+    body.innerHTML = `<p class="hint" style="margin:0">Sign in to keep scenarios in the cloud, open them on any device, and share them with your club or with everyone. Without signing in, Save keeps them in this browser.</p>
+      ${pw}
+      ${provs.length ? `<div class="row">${provs.map((k) => `<button class="btn" type="button" data-prov="${k}">${CLOUD.password ? "Or sign in" : "Sign in"} with ${PROVIDER_NAME[k]}</button>`).join("")}</div>` : ""}
+      ${CLOUD.email && !CLOUD.password ? `<form class="row" id="cEmailForm"><input type="email" id="cEmail" required placeholder="you@example.com" aria-label="Email address"><button class="btn" type="submit">Email me a sign-in link</button></form>` : ""}`;
+    body.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => {
+      const keep = F("cEmail")?.value || ""; authMode = b.dataset.mode; renderCloud(); if (F("cEmail")) F("cEmail").value = keep; (F("cNameNew") || F("cEmail"))?.focus();
+    }));
+    body.querySelectorAll("[data-prov]").forEach((b) => b.addEventListener("click", async () => {
+      const { error } = await sb.auth.signInWithOAuth({ provider: b.dataset.prov, options: { redirectTo: pageURL() } });
+      if (error) toast(`Signing in with ${PROVIDER_NAME[b.dataset.prov]} isn't switched on yet.`);
+    }));
+    F("cAuth")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = F("cEmail").value.trim(), password = F("cPass").value, btn = e.submitter || F("cAuth").querySelector("[type=submit]");
+      if (up && password.length < 8) { toast("Use a longer password: at least 8 characters."); return; }
+      if (btn.disabled) return;
+      btn.disabled = true;
+      if (up) {
+        const name = F("cNameNew").value.trim().slice(0, 40);
+        const { data, error } = await sb.auth.signUp({ email, password, options: { data: { full_name: name }, emailRedirectTo: pageURL() } });
+        if (error) toast(authErr(error));
+        else if (!data.session) toast(`Nearly there: check ${email} for a link to confirm your account.`);
+        else { authMode = "in"; toast(`Welcome, ${name}. Your account is ready.`); }
+      } else {
+        const { error } = await sb.auth.signInWithPassword({ email, password });
+        if (error) toast(authErr(error));
+      }
+      if (btn.isConnected) btn.disabled = false;
+    });
+    F("cReset")?.addEventListener("submit", async (e) => {
+      e.preventDefault(); const email = F("cEmail").value.trim();
+      const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: pageURL() });
+      if (error) toast(authErr(error)); else { authMode = "in"; renderCloud(); toast(`If ${email} has an account, a reset link is on its way.`); }
+    });
+    F("cEmailForm")?.addEventListener("submit", async (e) => {
+      e.preventDefault(); const email = F("cEmail").value.trim();
+      const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: pageURL() } });
+      toast(error ? "That link couldn't be sent. Check the address, or try again in a few minutes." : `Check ${email} for a sign-in link.`);
+    });
+    return;
+  }
+  const c = S.cloud, mine = c && c.owner === me.id, editors = myGroups.filter((g) => g.role !== "viewer");
+  let here;
+  if (!c) here = `<p class="hint" style="margin:0">Not in the cloud yet. Press <b>Save</b> to add it.</p>`;
+  else if (mine) {
+    const cur = c.visibility === "group" ? "g:" + c.group_id : c.visibility;
+    const opts = [["private", "Only me"], ...editors.map((g) => ["g:" + g.id, "Group: " + g.name]), ["public", "Everyone (listed under Public)"]];
+    if (!opts.some(([v]) => v === cur)) opts.splice(1, 0, [cur, "Group: " + (c.group_name || "a group you can't edit")]);
+    here = `<div class="row"><div class="field"><label class="lbl" for="cShare">Who can see it</label><select id="cShare">${opts.map(([v, t]) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
+      <button class="btn" type="button" id="cLink" style="align-self:flex-end">Copy link</button></div>
+      <p class="hint" style="margin:0">${c.visibility === "private" ? "The link only works for you." : c.visibility === "group" ? "Group members can open it from the link or their library; editors can change it." : "Anyone with the link can open it, and it's listed under Public."}</p>`;
+  } else if (canEditRow(c)) here = `<p class="hint" style="margin:0">Shared with <b>${esc(c.group_name || "your group")}</b> by ${esc(c.owner_name || "a member")}. Save updates it for the whole group.</p><div class="row"><button class="btn" type="button" id="cLink">Copy link</button></div>`;
+  else here = `<p class="hint" style="margin:0">This is ${esc(c.owner_name || "someone else")}'s scenario. Save makes your own copy.</p>${c.visibility !== "private" ? `<div class="row"><button class="btn" type="button" id="cLink">Copy link</button></div>` : ""}`;
+
+  const groupRow = (g) => {
+    const own = g.role === "owner", open = openGroup === g.id;
+    const sub = !open ? "" : `<div class="sub">
+      ${members.map((m) => `<div class="mem"><span>${esc(m.profiles?.display_name || "Commander")}${m.user_id === me.id ? " (you)" : ""}</span>
+        ${own && m.user_id !== me.id ? `<span class="acts"><select data-role="${esc(m.user_id)}" aria-label="Role">${["owner", "editor", "viewer"].map((r) => `<option value="${r}" ${m.role === r ? "selected" : ""}>${r[0].toUpperCase() + r.slice(1)}</option>`).join("")}</select>
+        <button class="btn sm danger" type="button" data-kick="${esc(m.user_id)}">Remove</button></span>` : `<span class="meta">${esc(m.role)}</span>`}</div>`).join("")}
+      ${own ? `<div class="row"><div class="field"><label class="lbl" for="cJoinRole">People who join can</label><select id="cJoinRole"><option value="editor" ${g.join_role === "editor" ? "selected" : ""}>Add and edit scenarios</option><option value="viewer" ${g.join_role === "viewer" ? "selected" : ""}>Only view</option></select></div></div>
+        <div class="row"><button class="btn sm" type="button" id="cNewCode">New invite link</button><button class="btn sm danger" type="button" id="cDelGroup">Delete group</button></div>
+        <p class="hint" style="margin:0">A new invite link stops the old one working. Deleting the group keeps its scenarios, private to whoever made them.</p>` : ""}</div>`;
+    return `<div class="lib-item"><div><b>${esc(g.name)}</b><div class="meta">You're ${g.role === "owner" ? "an owner" : g.role === "editor" ? "an editor" : "a viewer"}</div></div>
+      <div class="acts">${g.role !== "viewer" ? `<button class="btn sm" type="button" data-inv="${esc(g.id)}">Copy invite link</button>` : ""}
+        <button class="btn sm" type="button" data-mem="${esc(g.id)}" aria-expanded="${open}">${open ? "Hide" : own ? "Manage" : "Members"}</button>
+        ${own ? "" : `<button class="btn sm danger" type="button" data-leave="${esc(g.id)}">Leave</button>`}</div>${sub}</div>`;
+  };
+  const hasPw = (me.identities || []).some((i) => i.provider === "email") || me.app_metadata?.provider === "email";
+  const pwForm = (id, label, btn) => `<form class="row" id="${id}"><input type="password" id="${id}In" required minlength="8" autocomplete="new-password" aria-label="${label}" placeholder="${label}"><button class="btn sm${id === "cRecover" ? " gold" : ""}" type="submit">${btn}</button></form>`;
+  body.innerHTML = (recovering ? `<div class="lbl">Choose a new password</div>${pwForm("cRecover", "New password (at least 8 characters)", "Save new password")}` : "") +
+    `<div class="who"><span>Signed in as <b>${esc(myName)}</b></span><button class="btn sm" type="button" id="cOut">Sign out</button></div>
+    <form class="row" id="cNameForm"><input type="text" id="cName" maxlength="40" value="${esc(myName)}" aria-label="Display name"><button class="btn sm" type="submit">Change name</button></form>
+    ${hasPw && !recovering ? `<details><summary class="lbl" style="cursor:pointer">Change password</summary><div style="padding-top:8px">${pwForm("cPw", "New password (at least 8 characters)", "Change password")}</div></details>` : ""}
+    <div class="lbl">This scenario</div>${here}
+    <div class="lbl">Groups</div>
+    <div class="lib">${myGroups.map(groupRow).join("") || `<p class="hint" style="margin:0">Groups share a pool of scenarios, e.g. a club or an event. Make one and send its invite link, or paste an invite you were sent.</p>`}</div>
+    <form class="row" id="cNewForm"><input type="text" id="cNew" maxlength="60" required placeholder="New group name" aria-label="New group name"><button class="btn sm" type="submit">Create group</button></form>
+    <form class="row" id="cJoinForm"><input type="text" id="cJoin" required placeholder="Invite link or code" aria-label="Invite link or code"><button class="btn sm" type="submit">Join</button></form>`;
+
+  F("cOut").addEventListener("click", async () => { recovering = false; await sb.auth.signOut(); toast("Signed out."); });
+  for (const id of ["cRecover", "cPw"]) F(id)?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (F(id + "In").value.length < 8) { toast("Use a longer password: at least 8 characters."); return; }
+    const { error } = await sb.auth.updateUser({ password: F(id + "In").value });
+    if (error) toast(authErr(error)); else { recovering = false; renderCloud(); toast("Password changed."); }
+  });
+  F("cNameForm").addEventListener("submit", (e) => { e.preventDefault(); const n = F("cName").value.trim().slice(0, 40); if (!n) return;
+    groupAction(() => sb.from("profiles").update({ display_name: n }).eq("id", me.id).select("id"), "Couldn't change your name.", "Name changed.").then((ok) => { if (ok) { myName = n; renderCloud(); } }); });
+  F("cShare")?.addEventListener("change", () => setSharing(F("cShare").value));
+  F("cLink")?.addEventListener("click", () => copyText(`${pageURL()}?s=${S.cloud.id}`, "Link copied."));
+  body.querySelectorAll("[data-inv]").forEach((b) => b.addEventListener("click", () => { const g = myGroups.find((x) => x.id === b.dataset.inv); if (g) copyText(`${pageURL()}?join=${g.invite_code}`, `Invite link for “${g.name}” copied.`); }));
+  body.querySelectorAll("[data-mem]").forEach((b) => b.addEventListener("click", async () => {
+    openGroup = openGroup === b.dataset.mem ? null : b.dataset.mem; if (openGroup) await loadMembers(openGroup); renderCloud(); }));
+  body.querySelectorAll("[data-leave]").forEach((b) => armed(b, "Confirm leave", () => groupAction(() => sb.from("memberships").delete().eq("group_id", b.dataset.leave).eq("user_id", me.id).select("user_id"), "Leaving failed.", "You left the group.")));
+  body.querySelectorAll("[data-role]").forEach((sel) => sel.addEventListener("change", () => groupAction(() => sb.from("memberships").update({ role: sel.value }).eq("group_id", openGroup).eq("user_id", sel.dataset.role).select("user_id"), "Couldn't change their role.", "Role changed.")));
+  body.querySelectorAll("[data-kick]").forEach((b) => armed(b, "Confirm remove", () => groupAction(() => sb.from("memberships").delete().eq("group_id", openGroup).eq("user_id", b.dataset.kick).select("user_id"), "Couldn't remove them.", "Removed from the group.")));
+  F("cJoinRole")?.addEventListener("change", () => groupAction(() => sb.from("groups").update({ join_role: F("cJoinRole").value }).eq("id", openGroup).select("id"), "Couldn't change that.", "Saved."));
+  F("cNewCode")?.addEventListener("click", () => groupAction(() => sb.from("groups").update({ invite_code: newCode() }).eq("id", openGroup).select("id"), "Couldn't make a new link.", "New invite link made. The old one no longer works."));
+  if (F("cDelGroup")) armed(F("cDelGroup"), "Confirm delete", () => groupAction(() => sb.from("groups").delete().eq("id", openGroup).select("id"), "Couldn't delete the group.", "Group deleted."));
+  F("cNewForm").addEventListener("submit", (e) => { e.preventDefault(); const n = F("cNew").value.trim().slice(0, 60); if (!n) return;
+    groupAction(() => sb.from("groups").insert({ name: n }).select("id"), "Couldn't create the group.", `Group “${n}” created. Copy its invite link to bring people in.`); });
+  F("cJoinForm").addEventListener("submit", (e) => { e.preventDefault(); joinGroup(F("cJoin").value); });
+}
+function renderCloudLib() {
+  const host = F("lib"), pub = libTab === "public";
+  F("libWhere").textContent = pub ? "shared with everyone" : me ? "yours and your groups'" : "";
+  if (!pub && !me) { host.innerHTML = `<p class="hint" style="margin:0">Sign in under <b>Account &amp; sharing</b> to see your cloud library.</p>`; return; }
+  const rows = pub ? publicRows : cloudRows;
+  const item = (r) => {
+    const canDel = me && (r.owner === me.id || (r.visibility === "group" && roleIn(r.group_id) === "owner"));
+    return `<div class="lib-item"><div><b>${esc(r.name)}</b><div class="meta">${esc(deployName(r))} · ${Array.isArray(r.sites) ? r.sites.length : 0} Dropsites · ${esc(r.profiles?.display_name || "Commander")}${pub ? "" : " · " + esc(visText(r))} · ${new Date(r.updated_at).toLocaleDateString()}</div></div>
+      <div class="acts"><button class="btn sm" data-copen="${esc(r.id)}">Open</button><button class="btn sm" data-ccopy="${esc(r.id)}">Copy</button>${canDel ? `<button class="btn sm danger" data-cdel="${esc(r.id)}">Delete</button>` : ""}</div></div>`;
+  };
+  host.innerHTML = (pub ? `<form class="row" id="pubForm"><input type="text" id="pubQ" value="${esc(pubQuery)}" placeholder="Search by name" aria-label="Search public scenarios"><button class="btn sm" type="submit">Search</button></form>` : "") +
+    (rows.map(item).join("") || `<p class="hint" style="margin:0">${pub ? (pubQuery ? "No public scenarios match that." : "No public scenarios yet.") : "Nothing in the cloud yet. Press <b>Save</b> to add the scenario on the table."}</p>`);
+  F("pubForm")?.addEventListener("submit", async (e) => { e.preventDefault(); pubQuery = F("pubQ").value.slice(0, 60); await refreshCloudLists(); renderLibrary(); });
+  host.querySelectorAll("[data-copen]").forEach((b) => b.addEventListener("click", () => openCloud(b.dataset.copen, false)));
+  host.querySelectorAll("[data-ccopy]").forEach((b) => b.addEventListener("click", () => openCloud(b.dataset.ccopy, true)));
+  host.querySelectorAll("[data-cdel]").forEach((b) => armed(b, "Confirm delete", () => deleteCloud(b.dataset.cdel)));
+}
+F("libTabs").querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", async () => {
+  libTab = b.dataset.tab; renderLibrary();
+  if (sb && libTab !== "local") { await refreshCloudLists(); renderLibrary(); }
+}));
 F("saveBtn").addEventListener("click", saveScenario);
 
 // ---------------------------------------------------------------- export / import
@@ -1796,13 +2166,13 @@ function importJSON(text) {
   try {
     const o = JSON.parse(text);
     if (Array.isArray(o)) {
-      const good = o.filter((x) => x && Array.isArray(x.sites) && x.id);
+      const good = o.filter((x) => x && Array.isArray(x.sites) && x.id).map((x) => { const y = sanitise(x); delete y.cloud; return y; });
       if (!good.length) throw new Error("empty");
       const l = readLocalLib().filter((x) => !good.some((g) => g.id === x.id));
       library = [...good, ...l]; writeLocalLib(library); renderLibrary(); toast(`Added ${good.length} scenario${good.length === 1 ? "" : "s"} to your library.`); return;
     }
     if (!o || typeof o !== "object" || !Array.isArray(o.sites)) throw new Error("no sites");
-    loadScenario(o, false); toast(`Loaded “${S.name}”.`);
+    delete o.cloud; loadScenario(o, false); toast(`Loaded “${S.name}”.`);
   } catch (e) { toast("That isn't a scenario file from this builder. Check you copied the whole JSON."); }
 }
 F("importBtn").addEventListener("click", () => importJSON(F("importBox").value));
@@ -1830,6 +2200,7 @@ renderExamples();
   if (!draft) S.id = uid("sc");
   syncForm(); refreshAll();
   connectStore();
+  cloudInit();
 })();
 </script>
 
