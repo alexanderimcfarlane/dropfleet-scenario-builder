@@ -62,6 +62,20 @@ button, input, select, textarea { font: inherit; color: inherit; }
   font-family: var(--font-display); font-size: 20px; letter-spacing: .05em; padding: 2px 0; }
 #scName:focus { border-bottom-color: var(--gold); outline: none; }
 .cmd-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Account bar: sits under the command bar and always says whether you're signed in. */
+.acct { position: relative; z-index: 30; background: var(--panel); border-bottom: 1px solid var(--line); font-family: var(--font-ui); font-size: 12.5px; }
+.acct-in { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; min-height: 44px; padding-block: 6px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.acct-who { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.acct-who b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.acct-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.acct-dot.on { background: var(--good); }
+.acct-here { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; color: var(--muted); min-width: 0; }
+.acct-here b { color: var(--ink); font-weight: 600; }
+.acct-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.acct-pop { position: absolute; top: calc(100% + 6px); right: max(16px, env(safe-area-inset-right, 0px)); width: min(400px, calc(100vw - 32px));
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .28); border-radius: 4px; }
+.acct-pop .ph button { background: none; border: 0; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px; }
 .btn { font-family: var(--font-ui); font-size: 12.5px; font-weight: 500; border-radius: 3px; border: 1px solid var(--line);
   background: var(--panel); color: var(--ink); padding: 6px 11px; cursor: pointer; white-space: nowrap; }
 .btn:hover { border-color: var(--ink); }
@@ -74,7 +88,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 16px 40px; }
 .grid { display: grid; grid-template-columns: 250px minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
-@media (max-width: 1180px) { .grid { grid-template-columns: 230px minmax(0, 1fr); } .right { grid-column: 1 / -1; } }
+/* Narrower: tools | table column, and the right-hand blocks pack into columns underneath. */
+@media (max-width: 1180px) {
+  .grid { grid-template-columns: 230px minmax(0, 1fr); }
+  .stack.right { grid-column: 1 / -1; display: block; columns: 2 320px; column-gap: 16px; }
+  .stack.right > .panel { break-inside: avoid; margin-bottom: 16px; }
+}
 @media (max-width: 760px) { .grid { grid-template-columns: minmax(0, 1fr); } }
 
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; min-width: 0; }
@@ -155,8 +174,6 @@ tr[data-pick] { cursor: pointer; }
 .feat input { accent-color: var(--gold); }
 .feat.off { opacity: .45; cursor: default; }
 
-.lower { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; margin-top: 16px; align-items: start; }
-@media (max-width: 980px) { .lower { grid-template-columns: minmax(0, 1fr); } }
 .rounds { display: flex; gap: 6px; flex-wrap: wrap; }
 .rounds label { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-ui); font-size: 12px; border: 1px solid var(--line); border-radius: 3px; padding: 3px 8px; cursor: pointer; }
 .rounds input { accent-color: var(--gold); }
@@ -207,6 +224,17 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
     </div>
   </div>
 </header>
+<div class="acct" id="acctBar" hidden>
+  <div class="acct-in">
+    <span class="acct-who" id="acctWho"></span>
+    <span class="acct-here" id="acctHere"></span>
+    <span class="acct-acts" id="acctActs"></span>
+  </div>
+  <div class="acct-pop" id="authPop" hidden role="dialog" aria-labelledby="authTitle">
+    <section class="panel"><div class="ph"><span id="authTitle">Sign in</span><button type="button" id="authClose" aria-label="Close">×</button></div>
+      <div class="pb cloud" id="authBody"></div></section>
+  </div>
+</div>
 
 <main class="wrap">
   <div class="grid">
@@ -312,21 +340,49 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
       </section>
     </div>
 
-    <!-- Board -->
-    <section class="panel board-panel">
-      <div class="ph"><span>48" × 48" table</span><small id="boardInfo"></small><span class="banner" id="banner" role="status" hidden></span></div>
-      <div class="pb">
-        <div class="board-wrap">
-          <svg id="board" viewBox="-1.2 -1.2 50.4 50.4" tabindex="0" role="application" aria-label="Scenario table, 48 by 48 inches"></svg>
+    <!-- Table, then the briefing and sheet straight underneath it -->
+    <div class="stack mid">
+      <section class="panel board-panel">
+        <div class="ph"><span>48" × 48" table</span><small id="boardInfo"></small><span class="banner" id="banner" role="status" hidden></span></div>
+        <div class="pb">
+          <div class="board-wrap">
+            <svg id="board" viewBox="-1.2 -1.2 50.4 50.4" tabindex="0" role="application" aria-label="Scenario table, 48 by 48 inches"></svg>
+          </div>
+          <div class="legend">
+            <span><i style="background:#1FA3DC"></i>Blue deploys here</span>
+            <span><i style="background:#C8483C"></i>Red deploys here</span>
+            <span><i style="background:#E9A92A;height:4px"></i>Planetary Ring</span>
+            <span>Arrows: edge to centre of each site</span>
+          </div>
         </div>
-        <div class="legend">
-          <span><i style="background:#1FA3DC"></i>Blue deploys here</span>
-          <span><i style="background:#C8483C"></i>Red deploys here</span>
-          <span><i style="background:#E9A92A;height:4px"></i>Planetary Ring</span>
-          <span>Arrows: edge to centre of each site</span>
+      </section>
+      <section class="panel">
+        <div class="ph">Briefing</div>
+        <div class="pb">
+          <div class="field"><label class="lbl" for="tagline">Tagline</label><input type="text" id="tagline" maxlength="160"></div>
+          <div class="row">
+            <div class="field"><label class="lbl" for="players">Players</label><select id="players"><option value="2">2</option><option value="3–4">3–4</option></select></div>
+            <div class="field"><label class="lbl" for="length">Rounds</label><select id="length"><option>5</option><option selected>6</option><option>7</option></select></div>
+            <div class="field" style="flex:2 1 180px"><label class="lbl" for="objective">Objective</label>
+              <select id="objective">
+                <option value="standard">Standard Scoring</option>
+                <option value="survey">Standard Scoring + Survey</option>
+                <option value="protect">Standard Scoring + Protect</option>
+                <option value="attrition">Standard Scoring + Attrition</option>
+                <option value="raze">Raze</option>
+                <option value="extract">Extract</option>
+              </select></div>
+          </div>
+          <div class="field"><span class="lbl">Standard Scoring at the end of round</span><div class="rounds" id="rounds"></div></div>
+          <div class="field"><label class="lbl" for="rules">Special rules and extra scoring</label><textarea id="rules" rows="4" placeholder="One rule per line, e.g. Keystone: +2 VP each scoring round for Controlling Dropsite 4."></textarea></div>
+          <div class="field"><label class="lbl" for="scenery">Scenery</label><textarea id="scenery" rows="3" placeholder="e.g. 4 Micrometeor Clouds and 4 Debris Fields, placed alternately."></textarea></div>
         </div>
-      </div>
-    </section>
+      </section>
+      <section class="panel">
+        <div class="ph">Scenario sheet <button class="btn sm" id="copySheet">Copy as text</button></div>
+        <div class="pb sheet" id="sheet"></div>
+      </section>
+    </div>
 
     <!-- Inspector + balance -->
     <div class="stack right">
@@ -344,39 +400,8 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
           <p class="hint" style="margin:0">Distances run from each Deployment Zone to the centre of the Dropsite.</p>
         </div>
       </section>
-    </div>
-  </div>
-
-  <div class="lower">
-    <section class="panel">
-      <div class="ph">Briefing</div>
-      <div class="pb">
-        <div class="field"><label class="lbl" for="tagline">Tagline</label><input type="text" id="tagline" maxlength="160"></div>
-        <div class="row">
-          <div class="field"><label class="lbl" for="players">Players</label><select id="players"><option value="2">2</option><option value="3–4">3–4</option></select></div>
-          <div class="field"><label class="lbl" for="length">Rounds</label><select id="length"><option>5</option><option selected>6</option><option>7</option></select></div>
-          <div class="field" style="flex:2 1 180px"><label class="lbl" for="objective">Objective</label>
-            <select id="objective">
-              <option value="standard">Standard Scoring</option>
-              <option value="survey">Standard Scoring + Survey</option>
-              <option value="protect">Standard Scoring + Protect</option>
-              <option value="attrition">Standard Scoring + Attrition</option>
-              <option value="raze">Raze</option>
-              <option value="extract">Extract</option>
-            </select></div>
-        </div>
-        <div class="field"><span class="lbl">Standard Scoring at the end of round</span><div class="rounds" id="rounds"></div></div>
-        <div class="field"><label class="lbl" for="rules">Special rules and extra scoring</label><textarea id="rules" rows="4" placeholder="One rule per line, e.g. Keystone: +2 VP each scoring round for Controlling Dropsite 4."></textarea></div>
-        <div class="field"><label class="lbl" for="scenery">Scenery</label><textarea id="scenery" rows="3" placeholder="e.g. 4 Micrometeor Clouds and 4 Debris Fields, placed alternately."></textarea></div>
-      </div>
-    </section>
-    <div class="stack">
-      <section class="panel">
-        <div class="ph">Scenario sheet <button class="btn sm" id="copySheet">Copy as text</button></div>
-        <div class="pb sheet" id="sheet"></div>
-      </section>
       <section class="panel" id="cloudPanel" hidden>
-        <div class="ph">Account &amp; sharing <small id="cloudWho"></small></div>
+        <div class="ph">Account &amp; groups <small id="cloudWho"></small></div>
         <div class="pb cloud" id="cloudBody"></div>
       </section>
       <section class="panel">
@@ -1671,13 +1696,14 @@ async function deleteScenario(id) {
 function renderLibrary() {
   F("libTabs").querySelectorAll("[data-tab]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.tab === libTab)));
   if (libTab !== "local" && sb) { renderCloudLib(); return; }
-  F("libWhere").innerHTML = `saved in this browser <button class="btn sm" id="backupBtn" type="button">Back up library</button>`;
-  F("backupBtn").addEventListener("click", () => library.length ? offer("dropfleet_scenario_library.json", JSON.stringify(library, null, 2)) : toast("Nothing saved yet."));
+  F("libWhere").textContent = "saved in this browser";
   const host = F("lib");
   const items = [...library].sort((a, b) => String(b.updated || "").localeCompare(String(a.updated || "")));
   host.innerHTML = items.map((x) => `<div class="lib-item"><div><b>${esc(x.name)}</b><div class="meta">${esc(deployName(x))} · ${(x.sites || []).length} Dropsites${x.updated ? " · " + new Date(x.updated).toLocaleDateString() : ""}</div></div>
     <div class="acts"><button class="btn sm" data-open="${esc(x.id)}">Open</button><button class="btn sm" data-copy="${esc(x.id)}">Copy</button><button class="btn sm danger" data-del="${esc(x.id)}">Delete</button></div></div>`).join("")
     || `<p class="hint" style="margin:0">Nothing saved yet. Press <b>Save</b> to keep the scenario on the table here.</p>`;
+  if (library.length) host.insertAdjacentHTML("beforeend", `<div class="row"><button class="btn sm" id="backupBtn" type="button">Back up this library (JSON)</button></div>`);
+  F("backupBtn")?.addEventListener("click", () => offer("dropfleet_scenario_library.json", JSON.stringify(library, null, 2)));
   host.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => { const x = library.find((y) => y.id === b.dataset.open); if (x) { loadScenario(x, false); toast(`Opened “${x.name}”.`); } }));
   host.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", () => { const x = library.find((y) => y.id === b.dataset.copy); if (x) { const c = clone(x); c.name = x.name + " (copy)"; loadScenario(c, true); toast("Copy opened. Save it to keep it."); } }));
   host.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => {
@@ -1743,10 +1769,10 @@ function loadScript(src, integrity) {
 }
 async function cloudInit() {
   if (!CLOUD.url || !CLOUD.key) return;
-  F("cloudPanel").hidden = false; F("libTabs").hidden = false;
-  F("cloudBody").innerHTML = `<p class="hint" style="margin:0">Connecting…</p>`;
+  F("acctBar").hidden = false; F("libTabs").hidden = false;
+  F("acctWho").innerHTML = `<span class="acct-dot"></span><span class="muted">Connecting to the cloud library…</span>`;
   try { await loadScript(SB_SRC, SB_SRI); sb = window.supabase.createClient(CLOUD.url, CLOUD.key); }
-  catch (e) { sb = null; F("cloudBody").innerHTML = `<p class="hint" style="margin:0">The cloud library couldn't be reached, so Save keeps scenarios in this browser. Reload to try again.</p>`; return; }
+  catch (e) { sb = null; F("acctWho").innerHTML = `<span class="acct-dot"></span><span class="muted">The cloud library couldn't be reached, so Save keeps scenarios in this browser. Reload to try again.</span>`; return; }
   sb.auth.onAuthStateChange((ev, session) => {
     const u = session?.user || null;
     if (ev === "PASSWORD_RECOVERY") { recovering = true; setTimeout(() => renderCloud(), 0); }
@@ -1776,7 +1802,7 @@ async function handleLink() {
   if (sid && isUuid(sid)) await openCloud(sid, false, "That scenario is private or no longer exists. If it was shared with a group, sign in first.");
   if (code) {
     if (me) await joinGroup(code);
-    else { try { sessionStorage.setItem("dfc-join", code); } catch (e) {} toast("Sign in (Account & sharing, below) to join the group."); }
+    else { try { sessionStorage.setItem("dfc-join", code); } catch (e) {} openAuth("in"); toast("Sign in or create an account to join the group."); }
   }
 }
 async function loadGroups() {
@@ -1861,7 +1887,10 @@ function armed(btn, label, go) {
 }
 function renderCloud() {
   if (!sb) return;
-  const body = F("cloudBody");
+  renderAcctBar();
+  F("cloudPanel").hidden = !me;
+  if (me) F("authPop").hidden = true;
+  const body = me ? F("cloudBody") : F("authBody");
   F("cloudWho").textContent = me ? "" : "not signed in";
   if (!me) {
     const up = authMode === "up", reset = authMode === "reset";
@@ -1878,7 +1907,8 @@ function renderCloud() {
         <div class="row"><button class="btn gold" type="submit">${up ? "Create account" : "Sign in"}</button>
           ${!up && CLOUD.email ? `<button class="linkbtn" type="button" data-mode="reset">Forgot password?</button>` : ""}</div>
         ${up ? `<p class="hint" style="margin:0">Your email stays private; only your display name is shown with scenarios you share.</p>` : ""}</form>`;
-    body.innerHTML = `<p class="hint" style="margin:0">Sign in to keep scenarios in the cloud, open them on any device, and share them with your club or with everyone. Without signing in, Save keeps them in this browser.</p>
+    F("authTitle").textContent = reset ? "Reset your password" : up ? "Create an account" : "Sign in";
+    body.innerHTML = `<p class="hint" style="margin:0">Keep scenarios in the cloud, open them on any device, and share them with your club or with everyone.</p>
       ${pw}
       ${provs.length ? `<div class="row">${provs.map((k) => `<button class="btn" type="button" data-prov="${k}">${CLOUD.password ? "Or sign in" : "Sign in"} with ${PROVIDER_NAME[k]}</button>`).join("")}</div>` : ""}
       ${CLOUD.email && !CLOUD.password ? `<form class="row" id="cEmailForm"><input type="email" id="cEmail" required placeholder="you@example.com" aria-label="Email address"><button class="btn" type="submit">Email me a sign-in link</button></form>` : ""}`;
@@ -1949,7 +1979,7 @@ function renderCloud() {
   const hasPw = (me.identities || []).some((i) => i.provider === "email") || me.app_metadata?.provider === "email";
   const pwForm = (id, label, btn) => `<form class="row" id="${id}"><input type="password" id="${id}In" required minlength="8" autocomplete="new-password" aria-label="${label}" placeholder="${label}"><button class="btn sm${id === "cRecover" ? " gold" : ""}" type="submit">${btn}</button></form>`;
   body.innerHTML = (recovering ? `<div class="lbl">Choose a new password</div>${pwForm("cRecover", "New password (at least 8 characters)", "Save new password")}` : "") +
-    `<div class="who"><span>Signed in as <b>${esc(myName)}</b></span><button class="btn sm" type="button" id="cOut">Sign out</button></div>
+    `<div class="lbl">Your display name</div>
     <form class="row" id="cNameForm"><input type="text" id="cName" maxlength="40" value="${esc(myName)}" aria-label="Display name"><button class="btn sm" type="submit">Change name</button></form>
     ${hasPw && !recovering ? `<details><summary class="lbl" style="cursor:pointer">Change password</summary><div style="padding-top:8px">${pwForm("cPw", "New password (at least 8 characters)", "Change password")}</div></details>` : ""}
     <div class="lbl">This scenario</div>${here}
@@ -1958,7 +1988,6 @@ function renderCloud() {
     <form class="row" id="cNewForm"><input type="text" id="cNew" maxlength="60" required placeholder="New group name" aria-label="New group name"><button class="btn sm" type="submit">Create group</button></form>
     <form class="row" id="cJoinForm"><input type="text" id="cJoin" required placeholder="Invite link or code" aria-label="Invite link or code"><button class="btn sm" type="submit">Join</button></form>`;
 
-  F("cOut").addEventListener("click", async () => { recovering = false; await sb.auth.signOut(); toast("Signed out."); });
   for (const id of ["cRecover", "cPw"]) F(id)?.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (F(id + "In").value.length < 8) { toast("Use a longer password: at least 8 characters."); return; }
@@ -1985,7 +2014,7 @@ function renderCloud() {
 function renderCloudLib() {
   const host = F("lib"), pub = libTab === "public";
   F("libWhere").textContent = pub ? "shared with everyone" : me ? "yours and your groups'" : "";
-  if (!pub && !me) { host.innerHTML = `<p class="hint" style="margin:0">Sign in under <b>Account &amp; sharing</b> to see your cloud library.</p>`; return; }
+  if (!pub && !me) { host.innerHTML = `<p class="hint" style="margin:0"><button class="linkbtn" type="button" id="libSignIn">Sign in</button> to see your cloud library.</p>`; F("libSignIn").addEventListener("click", () => openAuth("in")); return; }
   const rows = pub ? publicRows : cloudRows;
   const item = (r) => {
     const canDel = me && (r.owner === me.id || (r.visibility === "group" && roleIn(r.group_id) === "owner"));
@@ -1999,6 +2028,39 @@ function renderCloudLib() {
   host.querySelectorAll("[data-ccopy]").forEach((b) => b.addEventListener("click", () => openCloud(b.dataset.ccopy, true)));
   host.querySelectorAll("[data-cdel]").forEach((b) => armed(b, "Confirm delete", () => deleteCloud(b.dataset.cdel)));
 }
+function sharingText() {
+  const c = S.cloud;
+  if (!c) return `<b>Not in the cloud yet</b> · press Save to add it`;
+  if (c.owner === me.id) return c.visibility === "public" ? `<b>Public</b> · anyone can find it` : c.visibility === "group" ? `Shared with <b>${esc(c.group_name || "a group")}</b>` : `<b>Only you</b> can see it`;
+  if (canEditRow(c)) return `<b>${esc(c.group_name || "Group")}</b> scenario by ${esc(c.owner_name || "a member")} · Save updates it for the group`;
+  return `<b>${esc(c.owner_name || "Someone")}'s</b> scenario · Save makes your own copy`;
+}
+function renderAcctBar() {
+  if (!me) {
+    F("acctWho").innerHTML = `<span class="acct-dot"></span><span><b>Not signed in</b> <span class="muted">· Save keeps scenarios in this browser</span></span>`;
+    F("acctHere").innerHTML = "";
+    F("acctActs").innerHTML = `<button class="btn sm" type="button" data-auth="in">Sign in</button><button class="btn sm gold" type="button" data-auth="up">Create account</button>`;
+  } else {
+    F("acctWho").innerHTML = `<span class="acct-dot on"></span><span>Signed in as <b>${esc(myName)}</b></span>`;
+    F("acctHere").innerHTML = `<span>This scenario: ${sharingText()}</span>` + (S.cloud ? `<button class="btn sm" type="button" id="barLink">Copy link</button>` : "");
+    F("acctActs").innerHTML = `<button class="btn sm" type="button" id="barAcct">Account &amp; groups</button><button class="btn sm" type="button" id="barOut">Sign out</button>`;
+    F("barLink")?.addEventListener("click", () => copyText(`${pageURL()}?s=${S.cloud.id}`, S.cloud.visibility === "private" ? "Link copied. Only you can open it until you share the scenario." : "Link copied."));
+    F("barAcct").addEventListener("click", () => {
+      F("cloudPanel").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+    });
+    F("barOut").addEventListener("click", async () => { recovering = false; await sb.auth.signOut(); toast("Signed out."); });
+  }
+  F("acctActs").querySelectorAll("[data-auth]").forEach((b) => b.addEventListener("click", () => openAuth(b.dataset.auth)));
+}
+function openAuth(mode) {
+  if (!sb || me) return;
+  authMode = mode; F("authPop").hidden = false; renderCloud();
+  setTimeout(() => (F("cNameNew") || F("cEmail"))?.focus(), 0);
+}
+const closeAuth = () => { F("authPop").hidden = true; };
+F("authClose").addEventListener("click", closeAuth);
+F("authPop").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); closeAuth(); } });
+document.addEventListener("pointerdown", (e) => { if (!F("authPop").hidden && !F("acctBar").contains(e.target)) closeAuth(); });
 F("libTabs").querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", async () => {
   libTab = b.dataset.tab; renderLibrary();
   if (sb && libTab !== "local") { await refreshCloudLists(); renderLibrary(); }
